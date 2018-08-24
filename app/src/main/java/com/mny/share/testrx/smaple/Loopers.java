@@ -17,6 +17,7 @@ import io.reactivex.schedulers.Schedulers;
 
 /**
  * Crate by E470PD on 2018/8/17
+ * 网络请求循环  1无条件2 有条件
  */
 public class Loopers {
     public static String TAG="RxJavaLooper";

@@ -20,7 +20,27 @@ import io.reactivex.schedulers.Schedulers;
 
 /**
  * Crate by E470PD on 2018/8/20
- * 背压策略
+ * 背压策略  一种 控制事件流速 的策略
+ * 背压：
+ * 作用：
+ * 在 异步订阅关系 中，控制事件发送 & 接收的速度
+ * 注：背压的作用域 = 异步订阅关系，即 被观察者 & 观察者处在不同线程中
+ * 应用场景：
+ * 被观察者发送事件速度 与 观察者接收事件速度 不匹配的场景
+ * 具体场景就取决于 该事件的类型，如：网络请求，那么具体场景：有很多网络请求需要执行
+ * ，但执行者的执行度没那么快，此时就需要使用背压策略来进行控制。
+ * 解决的问题
+ * 解决了 因被观察者发送事件速度 与 观察者接收事件速度 不匹配（一般是前者 快于 后者），从而
+ * 导致观察者无法及时响应 / 处理所有 被观察者发送事件 的问题、
+ * 背压的实现形式
+ * Flowable 支持背压模式
+ * 实现方式（Flowable<T> create(FlowableOnSubscribe<T> source, BackpressureStrategy mode)
+ * BackpressureStrategy.mode类型:
+ * BackPressureStrategy.ERROR;  直接抛出异常MissingBackpressureException
+ * BackpressureStrategy.MISSING; 友好提示缓存区满了
+ * BackpressureStrategy.BUFFER; 将缓存区大小设置成无限大 被观察者可无限发送事件 观察者可无限接收事件
+ * BackpressureStrategy.DROP;     超过缓存区（128）的事件将被丢弃
+ * BackpressureStrategy.LATEST;  只保留最新的事件超过缓存区（128）的将被丢弃
  */
 public class BackpressureFlowable {
     private static final String TAG = "BackpressureFlowable";
@@ -43,6 +63,7 @@ public class BackpressureFlowable {
                 Log.e(TAG, "发送成功: 第5个事件");
                 e.onNext(6);
                 Log.e(TAG, "发送成功: 第6个事件");
+                Log.e(TAG, "发送完成");
                 e.onComplete();
             }
         }, BackpressureStrategy.BUFFER)
@@ -160,4 +181,243 @@ public class BackpressureFlowable {
         observable.subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread()).subscribe(observer);
     }
+
+    //背压溢出测试
+    public static Subscription reciveSub;
+
+    public static void reciveTest() {
+        reciveSub.request(Long.MAX_VALUE);
+    }
+
+    public static void testError() {
+        Flowable.create(new FlowableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(FlowableEmitter<Integer> e) throws Exception {
+                for (int i = 0; i < 150; i++) {
+                    Log.e(TAG, "发送了事件" + i);
+                    e.onNext(i);
+                }
+                e.onComplete();
+            }
+        }, BackpressureStrategy.ERROR).subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread()).subscribe(new Subscriber<Integer>() {
+            @Override
+            public void onSubscribe(Subscription s) {
+                Log.d(TAG, "onSubscribe");
+                reciveSub = s;
+                // 默认不设置可接收事件大小
+            }
+
+            @Override
+            public void onNext(Integer integer) {
+                Log.e(TAG, "接收到了事件" + integer);
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                Log.w(TAG, "onError: ", t);
+            }
+
+            @Override
+            public void onComplete() {
+                Log.e(TAG, "onComplete");
+            }
+        });
+    }
+
+    /*背压模式smaple*/
+    public static void modeEorrorSmaple() {
+        // 创建被观察者Flowable
+        Flowable.create(new FlowableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(FlowableEmitter<Integer> emitter) throws Exception {
+
+                // 发送 129个事件
+                for (int i = 0; i < 129; i++) {
+                    Log.d(TAG, "发送了事件" + i);
+                    emitter.onNext(i);
+                }
+                emitter.onComplete();
+            }
+        }, BackpressureStrategy.ERROR) // 设置背压模式 = BackpressureStrategy.ERROR
+                .subscribeOn(Schedulers.io()) // 设置被观察者在io线程中进行
+                .observeOn(AndroidSchedulers.mainThread()) // 设置观察者在主线程中进行
+                .subscribe(new Subscriber<Integer>() {
+                    @Override
+                    public void onSubscribe(Subscription s) {
+                        Log.d(TAG, "onSubscribe");
+                    }
+
+                    @Override
+                    public void onNext(Integer integer) {
+                        Log.d(TAG, "接收到了事件" + integer);
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                        Log.w(TAG, "onError: ", t);
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        Log.d(TAG, "onComplete");
+                    }
+                });
+    }
+    public static void modeMissingSmaple() {
+        // 创建被观察者Flowable
+        Flowable.create(new FlowableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(FlowableEmitter<Integer> emitter) throws Exception {
+
+                // 发送 129个事件
+                for (int i = 0; i < 129; i++) {
+                    Log.d(TAG, "发送了事件" + i);
+                    emitter.onNext(i);
+                }
+                emitter.onComplete();
+            }
+        }, BackpressureStrategy.MISSING) // 设置背压模式 = BackpressureStrategy.MISSING
+                .subscribeOn(Schedulers.io()) // 设置被观察者在io线程中进行
+                .observeOn(AndroidSchedulers.mainThread()) // 设置观察者在主线程中进行
+                .subscribe(new Subscriber<Integer>() {
+                    @Override
+                    public void onSubscribe(Subscription s) {
+                        Log.d(TAG, "onSubscribe");
+                    }
+
+                    @Override
+                    public void onNext(Integer integer) {
+                        Log.d(TAG, "接收到了事件" + integer);
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                        Log.w(TAG, "onError: ", t);
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        Log.d(TAG, "onComplete");
+                    }
+                });
+    }
+    public static void modeBufferSmaple() {
+        // 创建被观察者Flowable
+        Flowable.create(new FlowableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(FlowableEmitter<Integer> emitter) throws Exception {
+
+                // 发送 129个事件
+                for (int i = 1; i < 130; i++) {
+                    Log.d(TAG, "发送了事件" + i);
+                    emitter.onNext(i);
+                }
+                emitter.onComplete();
+            }
+        }, BackpressureStrategy.BUFFER) // 设置背压模式 = BackpressureStrategy.BUFFER
+                .subscribeOn(Schedulers.io()) // 设置被观察者在io线程中进行
+                .observeOn(AndroidSchedulers.mainThread()) // 设置观察者在主线程中进行
+                .subscribe(new Subscriber<Integer>() {
+                    @Override
+                    public void onSubscribe(Subscription s) {
+                        Log.d(TAG, "onSubscribe");
+                    }
+
+                    @Override
+                    public void onNext(Integer integer) {
+                        Log.d(TAG, "接收到了事件" + integer);
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                        Log.w(TAG, "onError: ", t);
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        Log.d(TAG, "onComplete");
+                    }
+                });
+    }
+    public static Subscription mSubscriptionDrop;
+    public static void modeDropSmaple() {
+        Flowable.create(new FlowableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(FlowableEmitter<Integer> emitter) throws Exception {
+                // 发送150个事件
+                for (int i = 0; i < 150; i++) {
+                    Log.d(TAG, "发送了事件" + i);
+                    emitter.onNext(i);
+                }
+                emitter.onComplete();
+            }
+        }, BackpressureStrategy.DROP)      // 设置背压模式 = BackpressureStrategy.DROP
+                .subscribeOn(Schedulers.io()) // 设置被观察者在io线程中进行
+                .observeOn(AndroidSchedulers.mainThread()) // 设置观察者在主线程中进行
+                .subscribe(new Subscriber<Integer>() {
+                    @Override
+                    public void onSubscribe(Subscription s) {
+                        Log.d(TAG, "onSubscribe");
+                        mSubscriptionDrop = s;
+                        // 通过按钮进行接收事件
+                    }
+
+                    @Override
+                    public void onNext(Integer integer) {
+                        Log.d(TAG, "接收到了事件" + integer);
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                        Log.w(TAG, "onError: ", t);
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        Log.d(TAG, "onComplete");
+                    }
+                });
+    }
+
+    public static Subscription mSubscriptionLatest;
+    public static void modeLatestSmaple() {
+        Flowable.create(new FlowableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(FlowableEmitter<Integer> emitter) throws Exception {
+                for (int i = 0; i < 150; i++) {
+                    Log.d(TAG, "发送了事件" + i);
+                    emitter.onNext(i);
+                }
+                emitter.onComplete();
+            }
+        }, BackpressureStrategy.LATEST) // // 设置背压模式 = BackpressureStrategy.LATEST
+                .subscribeOn(Schedulers.io()) // 设置被观察者在io线程中进行
+                .observeOn(AndroidSchedulers.mainThread()) // 设置观察者在主线程中进行
+                .subscribe(new Subscriber<Integer>() {
+                    @Override
+                    public void onSubscribe(Subscription s) {
+                        Log.d(TAG, "onSubscribe");
+                        mSubscriptionLatest = s;
+                        // 通过按钮进行接收事件
+                    }
+
+                    @Override
+                    public void onNext(Integer integer) {
+                        Log.d(TAG, "接收到了事件" + integer);
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                        Log.w(TAG, "onError: ", t);
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        Log.d(TAG, "onComplete");
+                    }
+                });
+
+    }
+
 }
